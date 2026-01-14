@@ -145,22 +145,38 @@ class PlanningFlow(BaseFlow):
                 # Execute current step with appropriate agent
                 step_type = step_info.get("type") if step_info else None
                 executor = self.get_executor(step_type)
+
+                logger.info(f"[PLANNING FLOW] Starting execution of step {self.current_step_index}")
                 step_result = await self._execute_step(executor, step_info)
+                logger.info(f"[PLANNING FLOW] Step {self.current_step_index} execution returned. Result type: {type(step_result)}, Length: {len(str(step_result)) if step_result else 0}")
+
                 result += step_result + "\n"
 
                 # Human feedback: confirm step result before continuing
-                logger.info(f"Step {self.current_step_index} execution completed. Result length: {len(step_result) if step_result else 0}")
-                logger.info(f"Calling _confirm_step_result for step {self.current_step_index}")
+                # Force flush before human interaction
+                import sys
+                sys.stdout.flush()
+                sys.stderr.flush()
+
+                logger.info(f"[PLANNING FLOW] Step {self.current_step_index} execution completed. Result length: {len(str(step_result)) if step_result else 0}")
+                logger.info(f"[PLANNING FLOW] About to call _confirm_step_result for step {self.current_step_index}")
+                print(f"\n[DEBUG] Step {self.current_step_index} completed. Preparing for human feedback...")
+                sys.stdout.flush()
+
                 try:
-                    should_continue = await self._confirm_step_result(step_result)
-                    logger.info(f"Step {self.current_step_index} confirmation result: {should_continue}")
+                    should_continue = await self._confirm_step_result(str(step_result) if step_result else "[No result]")
+                    logger.info(f"[PLANNING FLOW] Step {self.current_step_index} confirmation completed. Result: {should_continue}")
                     if not should_continue:
                         logger.info("Step execution cancelled by user. Stopping execution.")
                         result += "\n[Execution stopped by user feedback]"
                         break
                 except Exception as e:
-                    logger.error(f"Error in step result confirmation for step {self.current_step_index}: {e}", exc_info=True)
+                    logger.error(f"[PLANNING FLOW] Error in step result confirmation for step {self.current_step_index}: {e}", exc_info=True)
+                    import traceback
+                    traceback.print_exc()
                     # Ask user if they want to continue despite the error
+                    print(f"\n[ERROR] Exception during step {self.current_step_index} confirmation: {e}")
+                    sys.stdout.flush()
                     should_continue = ask_human_confirmation(
                         f"\nError during step {self.current_step_index} result confirmation. Do you want to continue?",
                         default="y"
@@ -678,7 +694,7 @@ class PlanningFlow(BaseFlow):
             elif not isinstance(step_result, str):
                 step_result = str(step_result)
 
-            logger.info(f"Displaying step {self.current_step_index} result confirmation (result length: {len(step_result)})")
+            logger.info(f"[_confirm_step_result] Displaying step {self.current_step_index} result confirmation (result length: {len(step_result)})")
 
             step_info = None
             if self.current_step_index is not None:
@@ -690,12 +706,18 @@ class PlanningFlow(BaseFlow):
             # Force flush to ensure output is displayed
             import sys
             sys.stdout.flush()
+            sys.stderr.flush()
 
-            print("\n" + "-" * 80)
-            print(f"STEP {self.current_step_index} EXECUTION RESULT")
-            print("-" * 80)
+            # Add a very visible separator
+            print("\n" + "=" * 80)
+            print("=" * 80)
+            print(f"  STEP {self.current_step_index} EXECUTION RESULT - HUMAN FEEDBACK REQUIRED")
+            print("=" * 80)
+            print("=" * 80)
             if step_info:
-                print(f"Step: {step_info}")
+                print(f"\nStep: {step_info}")
+            else:
+                print(f"\nStep {self.current_step_index}: [No step info]")
 
             # Display result with pagination if too long
             if len(step_result) > 2000:
@@ -704,8 +726,12 @@ class PlanningFlow(BaseFlow):
             else:
                 print(f"\nResult:\n{step_result}")
 
-            print("-" * 80)
+            print("=" * 80)
+            print("=" * 80)
             sys.stdout.flush()  # Force flush again
+            sys.stderr.flush()
+
+            logger.info(f"[_confirm_step_result] About to ask user: Is this step result acceptable?")
 
             # Ask if result is acceptable
             result_acceptable = ask_human_confirmation(
